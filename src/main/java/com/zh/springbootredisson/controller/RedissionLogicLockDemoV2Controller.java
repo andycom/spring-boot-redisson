@@ -7,6 +7,7 @@ import io.swagger.annotations.ApiOperation;
 import org.redisson.api.RScript;
 import org.redisson.api.RSet;
 import org.redisson.api.RedissonClient;
+import org.redisson.client.codec.StringCodec;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
@@ -78,9 +79,33 @@ public class RedissionLogicLockDemoV2Controller {
         args[0] = "001_*";
 
         redissonClient.getBucket("foo").set("bar");
-        List<String> r = redissonClient.getScript().eval(RScript.Mode.READ_ONLY,
-                "return redis.call('keys', 'foo')", RScript.ReturnType.VALUE);
-        System.out.println(r.size());
+        String r = redissonClient.getScript().eval(RScript.Mode.READ_ONLY,
+                "return redis.call('get', 'foo')", RScript.ReturnType.VALUE);
+
+        String lua="local keys = redis.call('keys', 'foo');\n" +
+                "--下面通过mget获取所有key的值，call后面是可变长参数，unpack是将数组变成可变长参数\n" +
+                "local values = redis.call('mget', unpack(keys));\n" +
+                "--定义返回结果\n" +
+                "local keyValuePairs = {};" +
+                " --#keys是获取keys的长度，这里作了个for循环，将key与value对应起来\n" +
+                "--lua中字符串拼接是用..\n" +
+                "for i = 1, #keys do\n" +
+                "keyValuePairs[i] = keys[i] .. '\\t' .. values[i]\n" +
+                "end;\n" +
+                "--返回结果\n" +
+                "return keyValuePairs;";
+
+        redissonClient.getBucket("002_7_add").set("00001");
+        RScript script = redissonClient.getScript(StringCodec.INSTANCE);
+
+
+        List<String> rs = script.eval(RScript.Mode.READ_ONLY,
+                lua, RScript.ReturnType.STATUS);
+
+        Boolean c = script.eval(RScript.Mode.READ_ONLY,
+                "return redis.call('keys', 'foo')", RScript.ReturnType.BOOLEAN);
+
+        System.out.println(r);
         RScript rScript = redissonClient.getScript();
        // List<String> a = rScript.eval(RScript.Mode.READ_ONLY,"return redis.call('keys','*')",RScript.ReturnType.VALUE);
         List<String> entity = redissonClient.getScript().eval(RScript.Mode.READ_ONLY, "return redis.call('KEYS', 'KEYS[1]')", RScript.ReturnType.VALUE, keys, args);
@@ -130,25 +155,36 @@ public class RedissionLogicLockDemoV2Controller {
     }
 
     @GetMapping("lua")
-    @ApiOperation(value = "5.lua", notes = "测试redis写入")
+    @ApiOperation(value = "1.lua", notes = "测试redis写入")
     @ResponseBody
-    public String lua(){
+    public String lua(@RequestParam(defaultValue = "001") String userID, String id, String fileId) {
 
-        String key = "123456";
-        //String script = " redis.call('set', KEYS[1], ARGV[1]) ";
-        // 注意 KEYS  ARGV 需要大写，否则报错
-        String script = " redis.call('set', KEYS[1], ARGV[1])" +
-                "local str = redis.call('get', KEYS[1])   return str" ;
-        DefaultRedisScript<Goods>  defaultRedisScript = new DefaultRedisScript<>(script,Goods.class);
-        List<String> keys = Arrays.asList(key);
+        List<String> lockcheck = new ArrayList<>();
+        lockcheck.add("delete_" + id);  //orgId_1_delete
+        lockcheck.add("delete_" + "5"); //orgId_5_delete
+        lockcheck.add("delete_" + "7"); //orgId_7_delete
+        lockcheck.add("move_" + id);  // ordId_X_move_1
+        lockcheck.add("move_" + "5"); // ordId_X_move_5
+        lockcheck.add("move_" + "7"); // ordId_X_move_7
+        lockcheck.add(id + "_move");  //移除  // ordId_1_move_X
+        lockcheck.add("5" + "_move"); // ordId_5_move_X
+        lockcheck.add("7" + "_move"); // ordId_7_move_X
 
-        Goods goods = new Goods();
-        goods.setId("123456");
-        goods.setStock(100);
-        goods.setName("iPhone 12");
-        String value1 = JSON.toJSONString(goods);
-        Object execute = redisTemplate.execute(defaultRedisScript, keys, value1);
-        System.out.println(execute);
+
+        String r = redissonClient.getScript().eval(RScript.Mode.READ_ONLY,
+                "return redis.call('get', '002_7_add')", RScript.ReturnType.VALUE);
+
+
+        List<String> rs = redissonClient.getScript().eval(RScript.Mode.READ_ONLY,
+                "return redis.call('keys', '002')", RScript.ReturnType.STATUS);
+
+        Boolean c = redissonClient.getScript().eval(RScript.Mode.READ_ONLY,
+                "return redis.call('keys', '*') 0", RScript.ReturnType.STATUS);
+
+        System.out.println(r);
+        RScript rScript = redissonClient.getScript();
+
+
         return "ok";
     }
 
