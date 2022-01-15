@@ -49,8 +49,8 @@ public class RedissionLogicLockDemoV3Controller {
      * 1.2 祖先路径有delete 锁，返回异常信息 某个节点正在删除，请稍后再试  delete_5 ： 节点删除
      * 1.2 祖先有移动move 锁，移动 不允许新增 返回异常信息  5_move_6  ：节点5 移动到 6
      */
-    @GetMapping("lua11")
-    @ApiOperation(value = "1.luaqq", notes = "测试redis写入")
+    @GetMapping("add")
+    @ApiOperation(value = "1.增加文件 、文件夹", notes = "")
     @ResponseBody
     public String add(@RequestParam(defaultValue = "001") String userID, String id, String fileId) {
 
@@ -58,25 +58,44 @@ public class RedissionLogicLockDemoV3Controller {
         //0  查看祖先路径有没有删除锁  移动锁 出入
 
         List<String> lockcheck = new ArrayList<>();
-        lockcheck.add("delete_" + id);  //orgId_1_delete
-        lockcheck.add("delete_" + "5"); //orgId_5_delete
-        lockcheck.add("delete_" + "7"); //orgId_7_delete
-        lockcheck.add("move_" + id);  // ordId_X_move_1
-        lockcheck.add("move_" + "5"); // ordId_X_move_5
-        lockcheck.add("move_" + "7"); // ordId_X_move_7
-        lockcheck.add(id + "_move");  //移除  // ordId_1_move_X
-        lockcheck.add("5" + "_move"); // ordId_5_move_X
-        lockcheck.add("7" + "_move"); // ordId_7_move_X
+        lockcheck.add(userID+"_" + id+"_delete");  //orgId_1_delete
+        lockcheck.add(userID+"_" + "5"+"_delete"); //orgId_5_delete
+        lockcheck.add(userID+"_" + "7"+"_delete"); //orgId_7_delete
+        lockcheck.add(userID+"_move_" + id);  //  移入 ordId_1908730912_move_1
+        lockcheck.add(userID+"_move_" + "5"); // ordId_23i2uy3i1_move_5
+        lockcheck.add(userID+"_move_" + "7"); // ordId_8392384_move_7
+        lockcheck.add(userID+"_"+id + "_move");  //移出  // ordId_1_move_090329423
+        lockcheck.add(userID+"_5" + "_move"); // ordId_5_move_9345783429
+        lockcheck.add(userID+"_7" + "_move"); // ordId_7_move_92374237
+
+
+        // TODO  list redisson 先预存到redis中 key 的逻辑设计
+        // 使用redis set 获取入参 table
+
+
+        RScript script = redissonClient.getScript(StringCodec.INSTANCE);
+
+        // List<String> a = rScript.eval(RScript.Mode.READ_ONLY,"return redis.call('keys','*')",RScript.ReturnType.VALUE);
+        List<Object> keys = new ArrayList<>();
+        keys.add("001_*");
+        keys.addAll(lockcheck);
+        Object[] args = new Object[1];
+        args[0] = "001_*";
+        List<Object> entity = script.eval(RScript.Mode.READ_ONLY, "return redis.call('keys', KEYS[1])",  RScript.ReturnType.MULTI, keys);
+
+        Boolean lock=script.eval(RScript.Mode.READ_ONLY, "return redis.call('keys', KEYS[1])",  RScript.ReturnType.BOOLEAN, keys);
+
+        System.out.println(entity.size());
 
 
 
+        RScript rScript = redissonClient.getScript();
         redissonClient.getBucket("foo").set("bar");
         String r = redissonClient.getScript().eval(RScript.Mode.READ_ONLY,
                 "return redis.call('get', 'foo')", RScript.ReturnType.VALUE);
 
         System.out.println(r);
         redissonClient.getBucket("002_7_add").set("00001");
-        RScript script = redissonClient.getScript(StringCodec.INSTANCE);
         String r2 = redissonClient.getScript().eval(RScript.Mode.READ_ONLY,
                 "return redis.call('get', '002_7_add')", RScript.ReturnType.VALUE);
         System.out.println(r2);
@@ -87,21 +106,16 @@ public class RedissionLogicLockDemoV3Controller {
                 "local a= true;  return a", RScript.ReturnType.BOOLEAN);
 
         System.out.println(r);
-        RScript rScript = redissonClient.getScript();
-       // List<String> a = rScript.eval(RScript.Mode.READ_ONLY,"return redis.call('keys','*')",RScript.ReturnType.VALUE);
-        List<Object> keys = new ArrayList<>();
-        keys.add("001_*");
-        Object[] args = new Object[1];
-        args[0] = "001_*";
+
 
         List<Object> res = script.eval(RScript.Mode.READ_ONLY,"return {1,2,3.3333,'foo',nil,'bar'}", RScript.ReturnType.MULTI, Collections.emptyList());
 
         String value = "test";
-        script.eval(RScript.Mode.READ_WRITE, "redis.call('set', KEYS[1], ARGV[1])", RScript.ReturnType.VALUE, Arrays.asList("foo"), value);
+        script.eval(RScript.Mode.READ_WRITE, "redis.call('set', KEYS[1], ARGV[1])", RScript.ReturnType.VALUE, Arrays.asList("1"), value);
 
         String val = script.eval(RScript.Mode.READ_WRITE, "return redis.call('get', KEYS[1])", RScript.ReturnType.VALUE, Arrays.asList("foo"));
 
-        List<Object> entity = script.eval(RScript.Mode.READ_ONLY, "return redis.call('keys', KEYS[1])",  RScript.ReturnType.MULTI, Arrays.asList("001_*"));
+       // List<Object> entity = script.eval(RScript.Mode.READ_ONLY, "return redis.call('keys', KEYS[1])",  RScript.ReturnType.MULTI, Arrays.asList("001_*"));
 
         System.out.println(entity.size());
         /*RSet<String> set = redissonClient.getSet(userID);
