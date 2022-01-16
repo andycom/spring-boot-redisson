@@ -8,10 +8,15 @@ import org.redisson.api.RedissonClient;
 import org.redisson.client.codec.StringCodec;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.util.ResourceUtils;
 import org.springframework.web.bind.annotation.*;
 
+import java.io.File;
+import java.io.FileNotFoundException;
+import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
+import org.apache.commons.io.FileUtils;
 
 /**
  * 7
@@ -32,7 +37,7 @@ import java.util.concurrent.TimeUnit;
  */
 @RestController
 @Api(value = "0.lua")
-@RequestMapping("v2")
+@RequestMapping("v3")
 public class RedissionLogicLockDemoV3Controller {
 
     @Autowired
@@ -52,7 +57,7 @@ public class RedissionLogicLockDemoV3Controller {
     @GetMapping("add")
     @ApiOperation(value = "1.增加文件 、文件夹", notes = "")
     @ResponseBody
-    public String add(@RequestParam(defaultValue = "001") String userID, String id, String fileId) {
+    public String add(@RequestParam(defaultValue = "001") String userID, String id, String fileId) throws InterruptedException {
 
 
         //0  查看祖先路径有没有删除锁  移动锁 出入
@@ -69,23 +74,52 @@ public class RedissionLogicLockDemoV3Controller {
         lockcheck.add(userID+"_7" + "_move"); // ordId_7_move_92374237
 
 
-        // TODO  list redisson 先预存到redis中 key 的逻辑设计
-        // 使用redis set 获取入参 table
+        // 1.初始化redis中的数据
+        RSet<String> set = redissonClient.getSet(userID+"ok"+fileId);
+        set.addAll(lockcheck);
+        set.expire(135,TimeUnit.SECONDS);
 
-
+        List<String> addLock = new ArrayList<>();
+        addLock.add(userID+"_add_" + id + "_" + fileId);
+        addLock.add(userID+"_add_" + "5_" + fileId);
+        addLock.add(userID+"_add_" + "7_" + fileId);
+        RSet<String> setLock = redissonClient.getSet(userID+"ok"+fileId+"Lock");
+        setLock.addAll(addLock);
+        setLock.expire(135,TimeUnit.SECONDS);
+        // 获取add 锁（原子操作）   文件夹新增、文件上传
         RScript script = redissonClient.getScript(StringCodec.INSTANCE);
+        String luaAdd= "return false";
+
+        try {
+            File file = ResourceUtils.getFile(ResourceUtils.CLASSPATH_URL_PREFIX +"lua/add.lua");
+            luaAdd = FileUtils.readFileToString(file,"UTF-8");
+            System.out.println("lua file: " + luaAdd);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
 
         // List<String> a = rScript.eval(RScript.Mode.READ_ONLY,"return redis.call('keys','*')",RScript.ReturnType.VALUE);
         List<Object> keys = new ArrayList<>();
         keys.add("001_*");
-        keys.addAll(lockcheck);
+        keys.add(userID+fileId);
+        keys.add(userID+fileId+"Lock");
         Object[] args = new Object[1];
         args[0] = "001_*";
         List<Object> entity = script.eval(RScript.Mode.READ_ONLY, "return redis.call('keys', KEYS[1])",  RScript.ReturnType.MULTI, keys);
+        List<Object> entity2 = script.eval(RScript.Mode.READ_ONLY, "return redis.call('keys', KEYS[2])",  RScript.ReturnType.MULTI, keys);
+        List<Object> entity3 = script.eval(RScript.Mode.READ_ONLY, "return redis.call('keys', KEYS[3])",  RScript.ReturnType.MULTI, keys);
 
-        Boolean lock=script.eval(RScript.Mode.READ_ONLY, "return redis.call('keys', KEYS[1])",  RScript.ReturnType.BOOLEAN, keys);
+        Boolean lock=script.eval(RScript.Mode.READ_ONLY, luaAdd,  RScript.ReturnType.BOOLEAN, keys);
 
-        System.out.println(entity.size());
+       if(lock){
+           System.out.println("获取到逻辑锁 开始执行文件新增");
+           Thread.sleep(20000);
+       }else{
+           System.out.println("未获取逻辑锁 安排重试或者任务失败");
+       }
+
+        System.out.println("新增文件结束");
+
 
 
 
