@@ -2,12 +2,13 @@ local function join_and_filter(checkKeys, lockKeys)
     local f=false;
     for i = 1, #checkKeys
     do for j=1 ,#lockKeys
-        do local tstring=string.match(lockKeys[j], checkKeys[i]);
+       do  local tstring=string.match(lockKeys[j], checkKeys[i]);
             if(not tstring)
             then
-            else f = true
+                f=false
+            else
+                f = true
             break
-            return f
             end;
         end;
     end;
@@ -15,19 +16,18 @@ local function join_and_filter(checkKeys, lockKeys)
         then
             return f
         end;
-
+    return f
 end
 
 ----keys[1] 用户持有的锁
 local keys = redis.call('keys', KEYS[1]); local keyValuePairs = {}; for i = 1, #keys do keyValuePairs[i] = keys[i]  end;
 
 ---- keys[2]  需要检查的锁
-local checkKeys=redis.call("sismember",KEYS[2]);
+local checkKeys=redis.call("smembers",KEYS[2]);
 ---- keys[3]  目标锁
-local supUserKeys=redis.call("sismember",KEYS[3]);
+local supUserKeys=redis.call("smembers",KEYS[3]);
 
 if(join_and_filter(checkKeys, keyValuePairs))
-
 then
     return false
 else

@@ -12,7 +12,6 @@ import org.springframework.util.ResourceUtils;
 import org.springframework.web.bind.annotation.*;
 
 import java.io.File;
-import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
@@ -26,14 +25,22 @@ import org.apache.commons.io.FileUtils;
  * 1 2 3 4
  * <p>
  * <p>
- * 锁使用redis SET 结构 获取到的锁 包含 节点 和锁的类型
+ *
  * 使用 key value 实现锁
  * 锁的含义体现在key 上
  * 多元操作
- * orgId_1_add  1 加锁
- * orgId_5_delete 5 删除锁
  *
- * 锁的信息包含  三种  1、add   2、delete    3、move
+ * 锁的信息包含  四种操作  1、add   2、delete   3、move  4、copy
+ *
+ * 001_1_delete 组织ID 为001 的用户删除 1 节点
+ * 002_5_move_6 组织ID 为001 的用户 5节点移动到6节点
+ * 技术实现：Redission \ redis  \  lua 脚本
+ * 1.lua 封装获取锁的逻辑 保证原子性
+ * 2.Redis String  key 保存org 持有的锁  设置超时时间
+ * 3.锁的续期参考Redission
+ * 4.java 逻辑组装要校验的二元操作信息和需要写入Redis中的二元操作信息
+ * 5.
+ *
  */
 @RestController
 @Api(value = "0.lua")
@@ -60,7 +67,7 @@ public class RedissionLogicLockDemoV3Controller {
     public String add(@RequestParam(defaultValue = "001") String userID, String id, String fileId) throws InterruptedException {
 
 
-        //0  查看祖先路径有没有删除锁  移动锁 出入
+        //0  Java逻辑组织组要校验的锁
 
         List<String> lockcheck = new ArrayList<>();
         lockcheck.add(userID+"_" + id+"_delete");  //orgId_1_delete
@@ -74,7 +81,7 @@ public class RedissionLogicLockDemoV3Controller {
         lockcheck.add(userID+"_7" + "_move"); // ordId_7_move_92374237
 
 
-        // 1.初始化redis中的数据
+        // 1.初始化redis中的数据 lua 脚本入参
         RSet<String> set = redissonClient.getSet(userID+"ok"+fileId);
         set.addAll(lockcheck);
         set.expire(135,TimeUnit.SECONDS);
@@ -86,9 +93,9 @@ public class RedissionLogicLockDemoV3Controller {
         RSet<String> setLock = redissonClient.getSet(userID+"ok"+fileId+"Lock");
         setLock.addAll(addLock);
         setLock.expire(135,TimeUnit.SECONDS);
-        // 获取add 锁（原子操作）   文件夹新增、文件上传
+        // 脚本执行准备阶段
         RScript script = redissonClient.getScript(StringCodec.INSTANCE);
-        String luaAdd= "return false";
+        String luaAdd= "return false";  //lua 读取失败默认返回FALSE
 
         try {
             File file = ResourceUtils.getFile(ResourceUtils.CLASSPATH_URL_PREFIX +"lua/add.lua");
@@ -98,100 +105,41 @@ public class RedissionLogicLockDemoV3Controller {
             e.printStackTrace();
         }
 
-        // List<String> a = rScript.eval(RScript.Mode.READ_ONLY,"return redis.call('keys','*')",RScript.ReturnType.VALUE);
+        // 组装lua 入参
         List<Object> keys = new ArrayList<>();
         keys.add("001_*");
-        keys.add(userID+fileId);
-        keys.add(userID+fileId+"Lock");
+        keys.add(userID+"ok"+fileId);
+        keys.add(userID+"ok"+fileId+"Lock");
         Object[] args = new Object[1];
         args[0] = "001_*";
         List<Object> entity = script.eval(RScript.Mode.READ_ONLY, "return redis.call('keys', KEYS[1])",  RScript.ReturnType.MULTI, keys);
-        List<Object> entity2 = script.eval(RScript.Mode.READ_ONLY, "return redis.call('keys', KEYS[2])",  RScript.ReturnType.MULTI, keys);
-        List<Object> entity3 = script.eval(RScript.Mode.READ_ONLY, "return redis.call('keys', KEYS[3])",  RScript.ReturnType.MULTI, keys);
-
+        List<Object> entity2 = script.eval(RScript.Mode.READ_ONLY, "return redis.call('smembers',KEYS[2])",  RScript.ReturnType.MULTI, keys);
+        List<Object> entity3 = script.eval(RScript.Mode.READ_ONLY, "return redis.call('smembers',KEYS[3])",  RScript.ReturnType.MULTI, keys);
+        // lua 脚本原子操作获取锁 获取add 锁（原子操作）   文件夹新增、文件上传
         Boolean lock=script.eval(RScript.Mode.READ_ONLY, luaAdd,  RScript.ReturnType.BOOLEAN, keys);
 
        if(lock){
            System.out.println("获取到逻辑锁 开始执行文件新增");
+           // 模拟上传文件操作
            Thread.sleep(20000);
+           // todo 锁续期
+           System.out.println("获取到逻辑锁 文件新增结束");
+           // todo 锁删除
+           for(String s:addLock){
+             redissonClient.getBucket(s).delete();
+           }
+
        }else{
            System.out.println("未获取逻辑锁 安排重试或者任务失败");
        }
 
-        System.out.println("新增文件结束");
+        System.out.println("新增文件业务结束");
 
 
 
 
-        RScript rScript = redissonClient.getScript();
-        redissonClient.getBucket("foo").set("bar");
-        String r = redissonClient.getScript().eval(RScript.Mode.READ_ONLY,
-                "return redis.call('get', 'foo')", RScript.ReturnType.VALUE);
-
-        System.out.println(r);
-        redissonClient.getBucket("002_7_add").set("00001");
-        String r2 = redissonClient.getScript().eval(RScript.Mode.READ_ONLY,
-                "return redis.call('get', '002_7_add')", RScript.ReturnType.VALUE);
-        System.out.println(r2);
-        List<Object> rs = script.eval(RScript.Mode.READ_ONLY,
-                "local keys = redis.call('keys', '*'); local keyValuePairs = {}; for i = 1, #keys do keyValuePairs[i] = keys[i]  end; return keyValuePairs", RScript.ReturnType.MULTI,Collections.emptyList());
-        System.out.println(rs);
-        Boolean c = script.eval(RScript.Mode.READ_ONLY,
-                "local a= true;  return a", RScript.ReturnType.BOOLEAN);
-
-        System.out.println(r);
 
 
-        List<Object> res = script.eval(RScript.Mode.READ_ONLY,"return {1,2,3.3333,'foo',nil,'bar'}", RScript.ReturnType.MULTI, Collections.emptyList());
-
-        String value = "test";
-        script.eval(RScript.Mode.READ_WRITE, "redis.call('set', KEYS[1], ARGV[1])", RScript.ReturnType.VALUE, Arrays.asList("1"), value);
-
-        String val = script.eval(RScript.Mode.READ_WRITE, "return redis.call('get', KEYS[1])", RScript.ReturnType.VALUE, Arrays.asList("foo"));
-
-       // List<Object> entity = script.eval(RScript.Mode.READ_ONLY, "return redis.call('keys', KEYS[1])",  RScript.ReturnType.MULTI, Arrays.asList("001_*"));
-
-        System.out.println(entity.size());
-        /*RSet<String> set = redissonClient.getSet(userID);
-        Set<String> setCopy=new HashSet<>(set.size());
-        setCopy.addAll(set);
-        List<String> locks1=new ArrayList<>();
-        for(String lockString: lockcheck){
-         locks1 = setCopy.stream().filter(o->o.startsWith(lockString)).collect(Collectors.toList());
-        }
-
-        if(locks1.size()>0){
-            System.out.println("发现并发锁1");
-            return  "发现锁： "+ setCopy.stream().findFirst().get();
-        }
-        setCopy.retainAll(lockcheck);
-        if (setCopy.size() > 0) {
-            System.out.println("发现并发锁2");
-            // todo 不一定是第一个
-            return "发现锁： " + setCopy.stream().findFirst().get();
-        } else {
-            List<String> addLock = new ArrayList<>();
-            addLock.add("add_" + id + "_" + fileId);
-            addLock.add("add_" + "5_" + fileId);
-            addLock.add("add_" + "7_" + fileId);
-            try {
-                //2.查询所有父节点id  从ES差  某个节点的信息 祖先节点List  去除0
-                set.addAll(addLock);
-                set.expire(60, TimeUnit.SECONDS);
-                set.forEach(System.out::println);
-                System.out.println("文件正在写入");
-                Thread.sleep(20000);
-
-                set.forEach(System.out::println);
-            } catch (Exception e) {
-                Boolean unLock = set.removeAll(addLock);
-                e.printStackTrace();
-            } finally {
-                System.out.println("释放锁");
-                Boolean unLock = set.removeAll(addLock);
-            }
-            return "用户： " + userID + "文件上传、文件夹新建 " + "结果：  成功";
-        }*/
         return "lua";
     }
 
