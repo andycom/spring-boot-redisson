@@ -17,16 +17,17 @@ local checkKeys= {'001_1_delete','001_5_delete','001_7_delete','001_1_move','001
 
 
 local function join_and_filter(checkKeys, lockKeys)
-    local f=false;
+    local f = false;
+    local re = false;
     for i = 1, #checkKeys
     do print(checkKeys[i])
         for j=1 ,#lockKeys
         do local tstring=string.match(lockKeys[j], checkKeys[i]);
           if(not tstring)
            then
-              f=false
+              f = false
            else
-              f = true
+              re = true
               break
           end;
         end;
@@ -35,7 +36,7 @@ local function join_and_filter(checkKeys, lockKeys)
     then
         return f
     end;
-  return f
+  return re
 end
 
 local result = join_and_filter(checkKeys, lockKeys);

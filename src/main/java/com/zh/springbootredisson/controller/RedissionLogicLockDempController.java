@@ -47,7 +47,6 @@ public class RedissionLogicLockDempController {
     public String add(@RequestParam(defaultValue = "001") String userID, String id, String fileId) {
 
 
-        RedissionLogicLockDempController
         //0  查看祖先路径有没有删除锁  移动锁 出入
 
         List<String> lockcheck = new ArrayList<>();

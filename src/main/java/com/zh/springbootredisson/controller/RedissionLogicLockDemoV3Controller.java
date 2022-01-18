@@ -39,7 +39,10 @@ import org.apache.commons.io.FileUtils;
  * 2.Redis String  key 保存org 持有的锁  设置超时时间
  * 3.锁的续期参考Redission
  * 4.java 逻辑组装要校验的二元操作信息和需要写入Redis中的二元操作信息
- * 5.
+ *
+ *
+ * 缺点： 被锁的节点信息用户看不到  lua 封装返回true or false
+ *
  *
  */
 @RestController
@@ -75,7 +78,7 @@ public class RedissionLogicLockDemoV3Controller {
         lockcheck.add(userID+"_" + "7"+"_delete"); //orgId_7_delete
         lockcheck.add(userID+"_move_" + id);  //  移入 ordId_1908730912_move_1
         lockcheck.add(userID+"_move_" + "5"); // ordId_23i2uy3i1_move_5
-        lockcheck.add(userID+"_move_" + "7"); // ordId_8392384_move_7
+        lockcheck.add(userID+"_move_" + "7"); // ordId_move_7_8392384      8392384移入7
         lockcheck.add(userID+"_"+id + "_move");  //移出  // ordId_1_move_090329423
         lockcheck.add(userID+"_5" + "_move"); // ordId_5_move_9345783429
         lockcheck.add(userID+"_7" + "_move"); // ordId_7_move_92374237
@@ -131,6 +134,7 @@ public class RedissionLogicLockDemoV3Controller {
 
        }else{
            System.out.println("未获取逻辑锁 安排重试或者任务失败");
+           // todo 删除准备信息
        }
 
         System.out.println("新增文件业务结束");
