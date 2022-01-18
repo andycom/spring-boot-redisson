@@ -53,8 +53,6 @@ public class RedissionLogicLockDemoV3Controller {
     @Autowired
     private RedissonClient redissonClient;
 
-    @Autowired
-    private RedisTemplate redisTemplate;
 
 
     /**
@@ -73,13 +71,13 @@ public class RedissionLogicLockDemoV3Controller {
         //0  Java逻辑组织组要校验的锁
 
         List<String> lockcheck = new ArrayList<>();
-        lockcheck.add(userID+"_" + id+"_delete");  //orgId_1_delete
+        lockcheck.add(userID+"_" + id+"_delete");  //orgId_1_delete_fileID  //一元操作增加fileID 保证锁唯一
         lockcheck.add(userID+"_" + "5"+"_delete"); //orgId_5_delete
         lockcheck.add(userID+"_" + "7"+"_delete"); //orgId_7_delete
         lockcheck.add(userID+"_move_" + id);  //  移入 ordId_1908730912_move_1
         lockcheck.add(userID+"_move_" + "5"); // ordId_23i2uy3i1_move_5
         lockcheck.add(userID+"_move_" + "7"); // ordId_move_7_8392384      8392384移入7
-        lockcheck.add(userID+"_"+id + "_move");  //移出  // ordId_1_move_090329423
+        lockcheck.add(userID+"_"+id + "_move");  //移出  // ordId_1_move_090329423   二元操作本身保证唯一
         lockcheck.add(userID+"_5" + "_move"); // ordId_5_move_9345783429
         lockcheck.add(userID+"_7" + "_move"); // ordId_7_move_92374237
 
@@ -138,11 +136,6 @@ public class RedissionLogicLockDemoV3Controller {
        }
 
         System.out.println("新增文件业务结束");
-
-
-
-
-
 
         return "lua";
     }
