@@ -24,9 +24,9 @@ end
 local keys = redis.call('keys', KEYS[1]); local keyValuePairs = {}; for i = 1, #keys do keyValuePairs[i] = keys[i]  end;
 
 ---- keys[2]  需要检查的锁
-local checkKeys_1=redis.call("smembers",KEYS[2]); local checkKeys = {}; for i = 1, #checkKeys_1 do checkKeys[i] = keys[i]  end;
+local checkKeys_1=redis.call("smembers",KEYS[2]); local checkKeys = {}; for i = 1, #checkKeys_1 do checkKeys[i] = checkKeys_1[i]  end;
 ---- keys[3]  目标锁
-local supUserKeys_1=redis.call("smembers",KEYS[3]); local supUserKeys = {}; for i = 1, #supUserKeys_1 do supUserKeys[i] = keys[i]  end;
+local supUserKeys_1=redis.call("smembers",KEYS[3]); local supUserKeys = {}; for i = 1, #supUserKeys_1 do supUserKeys[i] = supUserKeys_1[i]  end ;
 
 if(join_and_filter(checkKeys, keyValuePairs))
 then

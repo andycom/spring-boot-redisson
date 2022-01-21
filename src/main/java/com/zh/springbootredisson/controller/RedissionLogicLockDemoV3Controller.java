@@ -75,7 +75,7 @@ public class RedissionLogicLockDemoV3Controller {
         lockcheck.add(userID+"_" + "5"+"_delete"); //orgId_5_delete
         lockcheck.add(userID+"_" + "7"+"_delete"); //orgId_7_delete
         lockcheck.add(userID+"_move_" + id);  //  移入 ordId_1908730912_move_1
-        lockcheck.add(userID+"_move_" + "5"); // ordId_23i2uy3i1_move_5
+        lockcheck.add(userID+"_move_" + "5"); //
         lockcheck.add(userID+"_move_" + "7"); // ordId_move_7_8392384      8392384移入7
         lockcheck.add(userID+"_"+id + "_move");  //移出  // ordId_1_move_090329423   二元操作本身保证唯一
         lockcheck.add(userID+"_5" + "_move"); // ordId_5_move_9345783429
@@ -88,9 +88,9 @@ public class RedissionLogicLockDemoV3Controller {
         set.expire(135,TimeUnit.SECONDS);
 
         List<String> addLock = new ArrayList<>();
-        addLock.add(userID+"_add_" + id + "_" + fileId);
-        addLock.add(userID+"_add_" + "5_" + fileId);
-        addLock.add(userID+"_add_" + "7_" + fileId);
+        addLock.add(userID+"_" + id + "_add_" + fileId);  // 1节点被加上一个fileID
+        addLock.add(userID+"_5_add_" + fileId);
+        addLock.add(userID+"_7_add_" + fileId);
         RSet<String> setLock = redissonClient.getSet(userID+"ok"+fileId+"Lock");
         setLock.addAll(addLock);
         setLock.expire(135,TimeUnit.SECONDS);
@@ -138,6 +138,103 @@ public class RedissionLogicLockDemoV3Controller {
         System.out.println("新增文件业务结束");
 
         return "lua";
+    }
+
+    /**
+     *
+     * @param userID 用户ID
+     * @param id 被删除文件的parentID
+     * @param fileId  被删除文件ID
+     * @return
+     * @throws InterruptedException
+     *
+     * 场景逻辑： 删除2 节点
+     * 1. 2 没有新增 userID_2_add_fileID  2的子孙节点有没有 add 锁 、有没有复制入 、没有移动入
+     * 2. 2 有没有移入 userId_move_2_fileId
+     * 3. 2 有没有复制入 userID_copy_2_fileId
+     * 2-5-7 路径需要判断
+     * 4. 2 的祖先路径 有没有被移走
+     * userId_7_move_20220323
+     * userId_5_move_93938023
+     *5. 2 的祖先有没有被复制
+     * userId_7_copy_20220323
+     * userId_5_copy_93938023
+     */
+    @GetMapping("delete")
+    @ApiOperation(value = "1.删除文件 、文件夹", notes = "网盘删除文件 文件夹")
+    @ResponseBody
+    public String delete(@RequestParam(defaultValue = "001") String userID, @RequestParam(defaultValue = "2")String id, String fileId) throws InterruptedException {
+
+
+        //0  Java逻辑组织组要校验的锁
+
+        List<String> lockcheck = new ArrayList<>();
+        lockcheck.add(userID+"_add_" + id);  //orgId_2_add_fileID  // 2 节点文件夹有没有新增  （控制被删除文件夹下所有子孙节点是否新增）
+        lockcheck.add(userID+"_move_" + id); //
+        lockcheck.add(userID+"_copy_" + id); //
+        lockcheck.add(userID+"_7_move");  //
+        lockcheck.add(userID+"_5_move_"); //
+        lockcheck.add(userID+"_5_copy"); //
+        lockcheck.add(userID+"_7_copy");  //2 的祖先有没有被复制
+
+
+
+        // 1.初始化redis中的数据 lua 脚本入参
+        RSet<String> set = redissonClient.getSet(userID+"ok"+fileId);
+        set.addAll(lockcheck);
+        set.expire(135,TimeUnit.SECONDS);
+
+        List<String> addLock = new ArrayList<>();
+        addLock.add(userID+"_"+id+"_delete");
+        addLock.add(userID+"_5_add_"+ id+"_d");  //删除2 节点  父路径加add 锁  子节点删除的时候 父路径不能被移动出  复制出  可以add
+        addLock.add(userID+"_7_add_" + id+"_d");
+        RSet<String> setLock = redissonClient.getSet(userID+"ok"+fileId+"Lock");
+        setLock.addAll(addLock);
+        setLock.expire(135,TimeUnit.SECONDS);
+        // 脚本执行准备阶段
+        RScript script = redissonClient.getScript(StringCodec.INSTANCE);
+        String luaAdd= "return false";  //lua 读取失败默认返回FALSE
+
+        try {
+            File file = ResourceUtils.getFile(ResourceUtils.CLASSPATH_URL_PREFIX +"lua/add.lua");
+            luaAdd = FileUtils.readFileToString(file,"UTF-8");
+            System.out.println("lua file: " + luaAdd);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+
+        // 组装lua 入参
+        List<Object> keys = new ArrayList<>();
+        keys.add("001_*");
+        keys.add(userID+"ok"+fileId); //uuid +lock 唯一标识
+        keys.add(userID+"ok"+fileId+"Lock");
+        Object[] args = new Object[1];
+        args[0] = "001_*";
+        List<Object> entity = script.eval(RScript.Mode.READ_ONLY, "return redis.call('keys', KEYS[1])",  RScript.ReturnType.MULTI, keys);
+        List<Object> entity2 = script.eval(RScript.Mode.READ_ONLY, "return redis.call('smembers',KEYS[2])",  RScript.ReturnType.MULTI, keys);
+        List<Object> entity3 = script.eval(RScript.Mode.READ_ONLY, "return ",  RScript.ReturnType.MULTI, keys);
+        // lua 脚本原子操作获取锁 获取add 锁（原子操作）   文件夹新增、文件上传
+        Boolean lock=script.eval(RScript.Mode.READ_ONLY, luaAdd,  RScript.ReturnType.BOOLEAN, keys);
+
+        if(lock){
+            System.out.println("获取到逻辑锁 开始执行文件删除");
+            // 模拟上传文件操作
+            Thread.sleep(20000);
+            // todo 锁续期
+            System.out.println("获取到逻辑锁 文件删除结束");
+            // todo 锁删除
+            for(String s:addLock){
+                redissonClient.getBucket(s).delete();
+            }
+
+        }else{
+            System.out.println("其他子账户正在操作 请稍后再试");
+            // todo 删除准备信息
+        }
+
+        System.out.println("文件删除 文件夹删除  业务结束");
+
+        return "delete";
     }
 
 
