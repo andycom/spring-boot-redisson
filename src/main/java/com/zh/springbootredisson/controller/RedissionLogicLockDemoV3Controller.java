@@ -169,7 +169,7 @@ public class RedissionLogicLockDemoV3Controller {
         //0  Java逻辑组织组要校验的锁
 
         List<String> lockcheck = new ArrayList<>();
-        lockcheck.add(userID+"_add_" + id);  //orgId_2_add_fileID  // 2 节点文件夹有没有新增  （控制被删除文件夹下所有子孙节点是否新增）
+        lockcheck.add(userID+"_" + id+"_add");  //orgId_2_add_fileID  // 2 节点文件夹有没有新增  （控制被删除文件夹下所有子孙节点是否新增）
         lockcheck.add(userID+"_move_" + id); //
         lockcheck.add(userID+"_copy_" + id); //
         lockcheck.add(userID+"_7_move");  //
@@ -177,6 +177,154 @@ public class RedissionLogicLockDemoV3Controller {
         lockcheck.add(userID+"_5_copy"); //
         lockcheck.add(userID+"_7_copy");  //2 的祖先有没有被复制
 
+
+
+        // 1.初始化redis中的数据 lua 脚本入参
+        RSet<String> set = redissonClient.getSet(userID+"ok"+fileId);
+        set.addAll(lockcheck);
+        set.expire(135,TimeUnit.SECONDS);
+
+        List<String> addLock = new ArrayList<>();
+        addLock.add(userID+"_"+id+"_delete");
+        addLock.add(userID+"_5_add_"+ id+"_d");  //删除2 节点  父路径加add 锁  子节点删除的时候 父路径不能被移动出  复制出  可以add
+        addLock.add(userID+"_7_add_" + id+"_d");
+        RSet<String> setLock = redissonClient.getSet(userID+"ok"+fileId+"Lock");
+        setLock.addAll(addLock);
+        setLock.expire(135,TimeUnit.SECONDS);
+        // 脚本执行准备阶段
+        RScript script = redissonClient.getScript(StringCodec.INSTANCE);
+        String luaAdd= "return false";  //lua 读取失败默认返回FALSE
+
+        try {
+            File file = ResourceUtils.getFile(ResourceUtils.CLASSPATH_URL_PREFIX +"lua/add.lua");
+            luaAdd = FileUtils.readFileToString(file,"UTF-8");
+            System.out.println("lua file: " + luaAdd);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+
+        // 组装lua 入参
+        List<Object> keys = new ArrayList<>();
+        keys.add("001_*");
+        keys.add(userID+"ok"+fileId); //uuid +lock 唯一标识
+        keys.add(userID+"ok"+fileId+"Lock");
+        Object[] args = new Object[1];
+        args[0] = "001_*";
+        List<Object> entity = script.eval(RScript.Mode.READ_ONLY, "return redis.call('keys', KEYS[1])",  RScript.ReturnType.MULTI, keys);
+        List<Object> entity2 = script.eval(RScript.Mode.READ_ONLY, "return redis.call('smembers',KEYS[2])",  RScript.ReturnType.MULTI, keys);
+        List<Object> entity3 = script.eval(RScript.Mode.READ_ONLY, "return redis.call('smembers',KEYS[2])",  RScript.ReturnType.MULTI, keys);
+        // lua 脚本原子操作获取锁 获取add 锁（原子操作）   文件夹新增、文件上传
+        Boolean lock=script.eval(RScript.Mode.READ_ONLY, luaAdd,  RScript.ReturnType.BOOLEAN, keys);
+
+        if(lock){
+            System.out.println("获取到逻辑锁 开始执行文件删除");
+            // 模拟上传文件操作
+            Thread.sleep(20000);
+            // todo 锁续期
+            System.out.println("获取到逻辑锁 文件删除结束");
+            // todo 锁删除
+            for(String s:addLock){
+                redissonClient.getBucket(s).delete();
+            }
+
+        }else{
+            System.out.println("其他子账户正在操作 请稍后再试");
+            // todo 删除准备信息
+        }
+
+        System.out.println("文件删除 文件夹删除  业务结束");
+
+        return "delete";
+    }
+
+    /**
+     * 移动锁 移动锁不能复用脚本， 移动锁 是先锁 from 再锁to 的逻辑
+     *
+     * 移动对于源来说  是删除，移动某个节点（9080） 这个节点加 移出锁 模板节点加 移入锁
+     *
+     *      6节点移动到5节点
+     *      * <p>
+     *      * 1.1 判断 6节点上是否有新增锁
+     *      * 1.2 判断 6 节点上是否有移动锁  7 是否移动
+     *      * 1.3 判断 6 节点上有没有删除锁  7节点是否删除
+     *      * <p>
+     *      * <p>
+     *      * 2.1 判断5 节点是否删除  7 节点是否删除
+     *      * 2.2 判断 5 节点是被否移动 7 节点是否被移动
+     * @param userID
+     * @param sourceParentDirId
+     * @param sourceId
+     * @param destId
+     * @return
+     * @throws InterruptedException
+     */
+
+    @GetMapping("move")
+    @ApiOperation(value = "1.移动文件 文件夹", notes = "网盘移动文件 文件夹")
+    @ResponseBody
+    public String move(@RequestParam(defaultValue = "001") String userID, @RequestParam(defaultValue = "7")String sourceParentDirId,@RequestParam(defaultValue = "6")String sourceId, @RequestParam(defaultValue = "5")String destId) throws InterruptedException {
+
+
+
+        //0.源 锁检查  6节点
+        List<String> sourceLockCheck = new ArrayList<>();
+        //检查 6 节点下是不是在新增
+        sourceLockCheck.add(userID+"_"+sourceId+"_add");
+        // 检查有没有文件在移入 6    001_move_6_09879   节点09876 正在移入 节点6
+        sourceLockCheck.add(userID+"_move_" + sourceId);
+        // 检查 6 节点有没有被移出  001_6_move_392  节点6 正在移出到 392
+        sourceLockCheck.add(userID+"_" + sourceId+"_move");
+        // 检查 7 节点有没有被移出  001_6_move_1396  节点7 正在移出到 1396
+        sourceLockCheck.add(userID+"_" + "7"+"_move");
+        // 检查 6 节点有没有被删除
+        sourceLockCheck.add(userID+"_6" +"_delete");
+        // 检查 7 节点有没有被删除
+        sourceLockCheck.add(userID+"_7" +"_delete");
+        // 6 节点有没有被复制  出  入
+        // 检查有没有文件在复制 6 入   001_copy_6_9   节点9 正在复制入 节点9
+        sourceLockCheck.add(userID+"_copy_" + sourceId);
+        // 检查 6 节点有没有复制出  001_6_copy_192  节点6 正在复制到 192
+        sourceLockCheck.add(userID+"_" + sourceId+"_copy");
+        // 7 节点有没有被复制出
+        // 检查 7 节点有没有辅助出  001_7_copy_92  节点7 正在复制到 92
+        sourceLockCheck.add(userID+"_" + "7"+"_copy");
+
+
+
+
+
+        //1.目标锁检查  5 节点检查
+
+        List<String> destLockcheck = new ArrayList<>();
+        // 5 节点是否在删除
+        destLockcheck.add(userID+"_"+destId+"_delete_");
+        // 7 节点是否在删除
+        destLockcheck.add(userID+"_"+"7"+"_delete_");
+        // 5 节点有没有被移动走
+        destLockcheck.add(userID+"_"+destId+"_move_");
+        // 7 节点有没有被移动走
+        destLockcheck.add(userID+"_"+"7"+"_move_");
+        // 5 节点有没有被复制
+        destLockcheck.add(userID+"_"+destId+"_copy_");
+        // 7 节点有没有被复制
+        destLockcheck.add(userID+"_"+"7"+"_copy_");
+
+
+        //2.目标锁  6 节点 和 5 节点目标锁 一次性set 目标锁
+
+        //2.1 源文件锁
+
+        List<String> addLock = new ArrayList<>();
+        addLock.add(userID+"_"+sourceId+"_move_"+destId);  // 6 节点移动到5 节点下  6 节点锁信息
+
+        addLock.add(userID+"_move_"+ destId+"_"+sourceId);  //6 节点移动到5 节点下  5 节点锁信息
+
+        addLock.add(userID+"_7_add_" + sourceId+"_d");  //  6 节点父级  加add  锁  方式被删除  被移动走
+
+        //2.2 目标文件
+
+        addLock.add(id_source + "_move");
+        addLock.add("add_" + "7_"+ id_source);
 
 
         // 1.初始化redis中的数据 lua 脚本入参
