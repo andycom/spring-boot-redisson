@@ -1,40 +1,33 @@
-local function join_and_filter(checkKeys, lockKeys)
-    local f=false;
+local function locksCheck(checkKeys, lockKeys)
     local re=false
     for i = 1, #checkKeys
     do for j=1 ,#lockKeys
-       do  local tstring=string.match(lockKeys[j], checkKeys[i]);
-            if(not tstring)
+       do  local t0=string.match(lockKeys[j], checkKeys[i]);
+            if(not t0)
             then
-                f = false
             else
                 re = true
             break
             end;
         end;
     end;
-        if(f)
-        then
-            return f
-        end;
     return re
 end
 
-----keys[1] 用户持有的锁
-local keys = redis.call('keys', KEYS[1]); local keyValuePairs = {}; for i = 1, #keys do keyValuePairs[i] = keys[i]  end;
+---- keys[1] 用户持有的锁
+local userLocks = redis.call('keys', KEYS[1]); local luaUserLocks = {}; for i = 1, #userLocks do luaUserLocks[i] = userLocks[i]  end;
+---- keys[2] 需要检查的锁
+local userLocksCheck=redis.call('smembers',KEYS[2]); local luaSourceCheckKeys = {}; for i = 1, #userLocksCheck do luaSourceCheckKeys[i] = userLocksCheck[i]  end;
+---- keys[3] 目标锁
+local supUserKeys=redis.call('smembers',KEYS[3]); local luaSupUserKeys = {}; for i = 1, #supUserKeys do luaSupUserKeys[i] = supUserKeys[i]  end;
 
----- keys[2]  需要检查的锁
-local checkKeys_1=redis.call("smembers",KEYS[2]); local checkKeys = {}; for i = 1, #checkKeys_1 do checkKeys[i] = checkKeys_1[i]  end;
----- keys[3]  目标锁
-local supUserKeys_1=redis.call("smembers",KEYS[3]); local supUserKeys = {}; for i = 1, #supUserKeys_1 do supUserKeys[i] = supUserKeys_1[i]  end ;
-
-if(join_and_filter(checkKeys, keyValuePairs))
+if(locksCheck(luaSourceCheckKeys, userLocks))
 then
     return false
 else
-    for k = 1, #supUserKeys
-      do  redis.call("set",supUserKeys[k],'1')
-          redis.call('expire', supUserKeys[k], 30)
+    for k = 1, #luaSupUserKeys
+      do  redis.call('set',luaSupUserKeys[k],'1')
+          redis.call('expire', luaSupUserKeys[k], 30)
     end
     return true
 end
