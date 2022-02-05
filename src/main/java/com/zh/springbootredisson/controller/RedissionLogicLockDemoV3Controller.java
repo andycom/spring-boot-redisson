@@ -60,7 +60,7 @@ public class RedissionLogicLockDemoV3Controller {
      * 1.2 祖先有移动move 锁，移动 不允许新增 返回异常信息  5_move_6  ：节点5 移动到 6
      */
     @GetMapping("add")
-    @ApiOperation(value = "1.增加文件 、文件夹", notes = "")
+    @ApiOperation(value = "1.增加文件 、文件夹", notes = "文件夹创建 文件新增")
     @ResponseBody
     public String add(@RequestParam(defaultValue = "001") String userID, String id, String fileId) throws InterruptedException {
 
@@ -274,7 +274,7 @@ public class RedissionLogicLockDemoV3Controller {
         // 检查 7 节点有没有被移出  001_6_move_1396  节点7 正在移出到 1396
         sourceLockCheck.add(userID + "_" + "7" + "_move");
         // 检查 6 节点有没有被删除
-        sourceLockCheck.add(userID + "_6" + "_delete");
+        sourceLockCheck.add(userID + "_"+ sourceId+ "_delete");
         // 检查 7 节点有没有被删除
         sourceLockCheck.add(userID + "_7" + "_delete");
         // 6 节点有没有被复制  出  入
@@ -303,7 +303,7 @@ public class RedissionLogicLockDemoV3Controller {
         // 7 节点有没有被复制
         destLockcheck.add(userID + "_" + "7" + "_copy_");
 
-
+        destLockcheck.addAll(sourceLockCheck);
         //2.目标锁  6 节点 和 5 节点目标锁 一次性set 目标锁
 
         //2.1 源文件锁
@@ -342,7 +342,7 @@ public class RedissionLogicLockDemoV3Controller {
         String luaAdd = "return false";  //lua 读取失败默认返回FALSE
 
         try {
-            File file = ResourceUtils.getFile(ResourceUtils.CLASSPATH_URL_PREFIX + "lua/move.lua");
+            File file = ResourceUtils.getFile(ResourceUtils.CLASSPATH_URL_PREFIX + "lua/add.lua");
             luaAdd = FileUtils.readFileToString(file, "UTF-8");
             System.out.println("lua file: " + luaAdd);
         } catch (IOException e) {
@@ -352,14 +352,14 @@ public class RedissionLogicLockDemoV3Controller {
         // 组装lua 入参
         List<Object> keys = new ArrayList<>();
         keys.add("001_*");
-        keys.add(userID + TaskId + "sourceLockCheck"); //uuid +lock 唯一标识
+      //  keys.add(userID + TaskId + "sourceLockCheck"); //uuid +lock 唯一标识
         keys.add(userID + TaskId + "destLockcheck");
         keys.add(userID + TaskId + "addLock");
 
         List<Object> entity = script.eval(RScript.Mode.READ_ONLY, "return redis.call('keys', KEYS[1])", RScript.ReturnType.MULTI, keys);
         List<Object> entity2 = script.eval(RScript.Mode.READ_ONLY, "local checkKeys_2=redis.call('smembers',KEYS[2]); local checkKeys_dest = {}; for i = 1, #checkKeys_2 do checkKeys_dest[i] = checkKeys_2[i]  end; return checkKeys_dest", RScript.ReturnType.MULTI, keys);
         List<Object> entity3 = script.eval(RScript.Mode.READ_ONLY, "return redis.call('smembers',KEYS[3]) ", RScript.ReturnType.MULTI, keys);
-        List<Object> entity4 = script.eval(RScript.Mode.READ_ONLY, "return redis.call('smembers',KEYS[4]) ", RScript.ReturnType.MULTI, keys);
+      //  List<Object> entity4 = script.eval(RScript.Mode.READ_ONLY, "return redis.call('smembers',KEYS[4]) ", RScript.ReturnType.MULTI, keys);
 
         // lua 脚本原子操作获取锁 获取add 锁（原子操作）   文件夹新增、文件上传
         Boolean lock = script.eval(RScript.Mode.READ_ONLY, luaAdd, RScript.ReturnType.BOOLEAN, keys);
@@ -391,20 +391,17 @@ public class RedissionLogicLockDemoV3Controller {
     }
 
     /**
-     * 移动锁 移动锁不能复用脚本， 移动锁 是先锁 from 再锁to 的逻辑
+     * 6节点复制到5节点
      * <p>
-     * 移动对于源来说  是删除，移动某个节点（9080） 这个节点加 移出锁 模板节点加 移入锁
+     * 1.1 判断 6节点上是否有新增锁
+     * 1.2 判断 6 节点上是否有移动锁  7 是否移动
+     * 1.3 判断 6 节点上有没有删除锁  7节点是否删除
      * <p>
-     * 6节点移动到5节点
-     * * <p>
-     * * 1.1 判断 6节点上是否有新增锁
-     * * 1.2 判断 6 节点上是否有移动锁  7 是否移动
-     * * 1.3 判断 6 节点上有没有删除锁  7节点是否删除
-     * * <p>
-     * * <p>
-     * * 2.1 判断5 节点是否删除  7 节点是否删除
-     * * 2.2 判断 5 节点是被否移动 7 节点是否被移动
+     * <p>
+     * 2.1 判断5 节点是否删除  7 节点是否删除
+     * 2.2 判断 5 节点是被否移动 7 节点是否被移动
      *
+     * 能不能跨一级目录复制
      * @param userID
      * @param sourceParentDirId
      * @param sourceId
@@ -440,8 +437,8 @@ public class RedissionLogicLockDemoV3Controller {
         // 6 节点有没有被复制  出  入
         // 检查有没有文件在复制 6 入   001_copy_6_9   节点9 正在复制入 节点9
         sourceLockCheck.add(userID + "_copy_" + sourceId);
-        // 检查 6 节点有没有复制出  001_6_copy_192  节点6 正在复制到 192
-        sourceLockCheck.add(userID + "_" + sourceId + "_copy");
+
+
         // 7 节点有没有被复制出
         // 检查 7 节点有没有辅助出  001_7_copy_92  节点7 正在复制到 92
         sourceLockCheck.add(userID + "_" + "7" + "_copy");
@@ -462,7 +459,7 @@ public class RedissionLogicLockDemoV3Controller {
         destLockcheck.add(userID + "_" + destId + "_copy_");
         // 7 节点有没有被复制
         destLockcheck.add(userID + "_" + "7" + "_copy_");
-
+        destLockcheck.addAll(sourceLockCheck);
 
         //2.目标锁  6 节点 和 5 节点目标锁 一次性set 目标锁
 
@@ -502,7 +499,7 @@ public class RedissionLogicLockDemoV3Controller {
         String luaAdd = "return false";  //lua 读取失败默认返回FALSE
 
         try {
-            File file = ResourceUtils.getFile(ResourceUtils.CLASSPATH_URL_PREFIX + "lua/move.lua");
+            File file = ResourceUtils.getFile(ResourceUtils.CLASSPATH_URL_PREFIX + "lua/add.lua");
             luaAdd = FileUtils.readFileToString(file, "UTF-8");
             System.out.println("lua file: " + luaAdd);
         } catch (IOException e) {
@@ -512,14 +509,14 @@ public class RedissionLogicLockDemoV3Controller {
         // 组装lua 入参
         List<Object> keys = new ArrayList<>();
         keys.add("001_*");
-        keys.add(userID + TaskId + "sourceLockCheck"); //uuid +lock 唯一标识
+       // keys.add(userID + TaskId + "sourceLockCheck"); //uuid +lock 唯一标识
         keys.add(userID + TaskId + "destLockcheck");
         keys.add(userID + TaskId + "addLock");
 
         List<Object> entity = script.eval(RScript.Mode.READ_ONLY, "return redis.call('keys', KEYS[1])", RScript.ReturnType.MULTI, keys);
         List<Object> entity2 = script.eval(RScript.Mode.READ_ONLY, "local checkKeys_2=redis.call('smembers',KEYS[2]); local checkKeys_dest = {}; for i = 1, #checkKeys_2 do checkKeys_dest[i] = checkKeys_2[i]  end; return checkKeys_dest", RScript.ReturnType.MULTI, keys);
         List<Object> entity3 = script.eval(RScript.Mode.READ_ONLY, "return redis.call('smembers',KEYS[3]) ", RScript.ReturnType.MULTI, keys);
-        List<Object> entity4 = script.eval(RScript.Mode.READ_ONLY, "return redis.call('smembers',KEYS[4]) ", RScript.ReturnType.MULTI, keys);
+       // List<Object> entity4 = script.eval(RScript.Mode.READ_ONLY, "return redis.call('smembers',KEYS[4]) ", RScript.ReturnType.MULTI, keys);
 
         // lua 脚本原子操作获取锁 获取add 锁（原子操作）   文件夹新增、文件上传
         Boolean lock = script.eval(RScript.Mode.READ_ONLY, luaAdd, RScript.ReturnType.BOOLEAN, keys);
@@ -535,7 +532,7 @@ public class RedissionLogicLockDemoV3Controller {
                 redissonClient.getBucket(s).delete();
             }
             StringBuilder stringBuilder = new StringBuilder(TaskId);
-            stringBuilder.append("获取到逻辑锁 文件移动结束");
+            stringBuilder.append("获取到逻辑锁 文件复制结束");
             result = stringBuilder.toString();
 
         } else {
@@ -545,7 +542,7 @@ public class RedissionLogicLockDemoV3Controller {
             result = stringBuilder.toString();
         }
 
-        System.out.println("文件删除 文件夹删除  业务结束");
+        System.out.println("文件复制  业务结束");
 
         return result;
     }

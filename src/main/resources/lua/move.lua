@@ -23,7 +23,7 @@ local destLocksCheck=redis.call('smembers',KEYS[3]); local luaDestCheckKeys = {}
 ---- keys[4] 目标锁
 local supUserKeys=redis.call('smembers',KEYS[4]); local luaSupUserKeys = {}; for i = 1, #supUserKeys do luaSupUserKeys[i] = supUserKeys[i]  end;
 
-if(locksCheck(sourceLocksCheck, luaUserLocks) or locksCheck(checkKeys_2, luaUserLocks))
+if(locksCheck(sourceLocksCheck, luaUserLocks) or locksCheck(destLocksCheck, luaUserLocks))
 then
     return false
 else

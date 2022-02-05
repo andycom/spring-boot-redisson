@@ -43,3 +43,7 @@ local result = join_and_filter(checkKeys, lockKeys);
 
 print(result)
 return result
+
+
+
+local result = redis.call("SCAN", cursor, "MATCH", KEYS[1], "COUNT", 10);
