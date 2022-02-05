@@ -7,7 +7,7 @@ singleServerConfig:
   retryInterval: 1500
   #reconnectionTimeout: 3000
   #failedAttempts: 3
-  password: xraycloud
+  password: null
   subscriptionsPerConnection: 6
   clientName: null
   address: "redis://127.0.0.1:6379"
