@@ -94,11 +94,20 @@ public class RedissionLogicLockDemoV3Controller {
         // 脚本执行准备阶段
         RScript script = redissonClient.getScript(StringCodec.INSTANCE);
         String luaAdd = "return false";  //lua 读取失败默认返回FALSE
+        String luaScan = "return false";  //lua 读取失败默认返回FALSE
 
         try {
             File file = ResourceUtils.getFile(ResourceUtils.CLASSPATH_URL_PREFIX + "lua/add.lua");
             luaAdd = FileUtils.readFileToString(file, "UTF-8");
             System.out.println("lua file: " + luaAdd);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+
+        try {
+            File file = ResourceUtils.getFile(ResourceUtils.CLASSPATH_URL_PREFIX + "lua/scan.lua");
+            luaScan = FileUtils.readFileToString(file, "UTF-8");
+            System.out.println("lua file: " + luaScan);
         } catch (IOException e) {
             e.printStackTrace();
         }
@@ -110,7 +119,7 @@ public class RedissionLogicLockDemoV3Controller {
         keys.add(userID + "ok" + fileId + "Lock");
         Object[] args = new Object[1];
         args[0] = "001_*";
-        List<Object> entity = script.eval(RScript.Mode.READ_ONLY, "return redis.call('keys', KEYS[1])", RScript.ReturnType.MULTI, keys);
+        List<Object> entity = script.eval(RScript.Mode.READ_ONLY, luaScan, RScript.ReturnType.MULTI, keys);
         List<Object> entity2 = script.eval(RScript.Mode.READ_ONLY, "return redis.call('smembers',KEYS[2])", RScript.ReturnType.MULTI, keys);
         List<Object> entity3 = script.eval(RScript.Mode.READ_ONLY, "return redis.call('smembers',KEYS[3])", RScript.ReturnType.MULTI, keys);
         // lua 脚本原子操作获取锁 获取add 锁（原子操作）   文件夹新增、文件上传
